@@ -242,64 +242,58 @@ exports.getStats =
 |
 */
 
-exports.getPayments =
-    async (
-        req,
-        res,
-        next
-    ) => {
+const getPayments = async (req, res) => {
+  try {
+    // Fetch payments and populate student information only.
+    // Payment schema does not contain an "event" field.
+    const payments = await Payment.find()
+      .populate(
+        "student",
+        "fullName email mobileNumber collegePid collegeName yearSemester"
+      )
+      .sort({ createdAt: -1 })
+      .lean();
 
-        try {
+    // Get registration and event details separately.
+    const paymentsWithDetails = await Promise.all(
+      payments.map(async (payment) => {
+        let registration = null;
+        let event = null;
 
-            const payments =
-                await Payment.find()
+        if (payment.registration) {
+          registration = await Registration.findById(
+            payment.registration
+          ).lean();
 
-                    /*
-                     * Student information
-                     */
-                    .populate(
-                        "student",
-                        "fullName email mobileNumber collegeName yearSemester"
-                    )
-
-                    /*
-                     * Event information
-                     */
-                    .populate(
-                        "event",
-                        "name category date location fee"
-                    )
-
-                    /*
-                     * Registration information
-                     */
-                    .populate(
-                        "registration",
-                        "registrationId participationType teamName numberOfMembers registrationStatus"
-                    )
-
-                    /*
-                     * Latest payments first
-                     */
-                    .sort({
-                        createdAt: -1
-                    });
-
-
-            res.json({
-
-                payments
-
-            });
-
-        } catch (error) {
-
-            console.error(
-                "Get all payments error:",
-                error
-            );
-
-            next(error);
-
+          if (registration?.event) {
+            event = await Event.findById(registration.event)
+              .select("name category date location fee")
+              .lean();
+          }
         }
-    };
+
+        return {
+          ...payment,
+          registration,
+          event,
+        };
+      })
+    );
+
+    return res.status(200).json({
+      success: true,
+      count: paymentsWithDetails.length,
+      payments: paymentsWithDetails,
+    });
+  } catch (error) {
+    console.error("GET ADMIN PAYMENTS ERROR:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch payments.",
+      error: error.message,
+    });
+  }
+};
+
+module.exports.getPayments = getPayments;
